@@ -102,16 +102,18 @@ import cv2
 import os
 import numpy as np
 
-# Load Haar Cascade
 model_path = os.path.join("model", "haarcascade_frontalface_default.xml")
 face_cascade = cv2.CascadeClassifier(model_path)
+if face_cascade.empty():
+    print("Error: Could not load Haar Cascade")
+    exit()
 
 reference_people = {
     "admin": [],
     "p2": [],
-    # "Bob": [],
 }
 
+print("Loading reference faces...")
 for name in reference_people.keys():
     person_folder = os.path.join("images", name)
     if not os.path.exists(person_folder):
@@ -119,30 +121,45 @@ for name in reference_people.keys():
         continue
 
     for filename in os.listdir(person_folder):
-        if filename.lower().endswith((".jpg", ".png")):
-            img = cv2.imread(os.path.join(person_folder, filename), cv2.IMREAD_GRAYSCALE)
+        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            img_path = os.path.join(person_folder, filename)
+            img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+
+            if img is None:
+                print(f"Warning: Could not read {img_path}")
+                continue
+
             faces = face_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=5)
             if len(faces) > 0:
                 (x, y, w, h) = faces[0]
                 face_img = cv2.resize(img[y:y + h, x:x + w], (200, 200))
                 reference_people[name].append(face_img)
+                print(f"Loaded {filename} for {name}")
+            else:
+                print(f"No face found in {filename}")
 
-# Thresholds per person (customizable)
+# Remove empty entries
+reference_people = {k: v for k, v in reference_people.items() if v}
+if not reference_people:
+    print("Error: No valid reference faces loaded")
+    exit()
+
+# Thresholds
 MATCH_THRESHOLDS = {
     "admin": 5000,
     "p2": 4500,
-    # "Bob": 5500
 }
 
-if not reference_people:
-    print("Error: No reference faces found in 'images' folder")
+# Camera capture
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("Error: Could not open camera")
     exit()
 
-cap = cv2.VideoCapture(0)
-print("Taking photo in 3 seconds... (Look at the camera)")
+print("\nTaking photo in 3 seconds... (Look at the camera)")
 for i in range(3, 0, -1):
     print(f"{i}...", end=' ', flush=True)
-    cv2.waitKey(1000)  # Wait 1 second per count
+    cv2.waitKey(1000)
 
 ret, frame = cap.read()
 cap.release()
@@ -151,31 +168,46 @@ if not ret:
     print("\nError: Failed to capture photo")
     exit()
 
+# Save captured image (for debugging)
+cv2.imwrite("last_capture.jpg", frame)
+
+# Face detection
 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(100, 100))
 
 if len(faces) == 0:
-    print("\nResult: No faces detected in photo")
+    print("\nNo faces detected in photo")
+    print("Debug: Saved capture as 'last_capture.jpg'")
     exit()
 
-MATCH_THRESHOLD = 5000 # Fix depending on ur instructions (the lower - more likely u!)
 print("\n--- Results ---")
 
+# Process each face
 for i, (x, y, w, h) in enumerate(faces):
     face_roi = gray[y:y + h, x:x + w]
     face_resized = cv2.resize(face_roi, (200, 200))
 
+    best_match = "Unknown"
     best_score = float('inf')
-    for ref_face in reference_people:
-        score = np.mean((ref_face.astype("float") - face_resized.astype("float")) ** 2)
-        if score < best_score:
-            best_score = score
 
-    if best_score < MATCH_THRESHOLD:
-        print(f"Face {i + 1}: ✅ YOU (Score: {best_score:.0f})")
+    # Compare with all reference people
+    for name, ref_faces in reference_people.items():
+        for ref_face in ref_faces:
+            # Ensure both are numpy arrays
+            if not isinstance(ref_face, np.ndarray) or not isinstance(face_resized, np.ndarray):
+                print("Error: Invalid face data format")
+                continue
+
+            score = np.mean((ref_face.astype("float") - face_resized.astype("float")) ** 2)
+
+            if score < best_score and score < MATCH_THRESHOLDS.get(name, 5000):
+                best_score = score
+                best_match = name
+
+    # Print results
+    if best_match != "Unknown":
+        print(f"Face {i + 1}: ✅ {best_match} (Score: {best_score:.0f})")
     else:
-        print(f"Face {i + 1}: ❌ Unknown (Score: {best_score:.0f})")
+        print(f"Face {i + 1}: ❌ Unknown (Best score: {best_score:.0f})")
 
-# Optional: Save the captured photo
-cv2.imwrite("captured_photo.jpg", frame)
-print("Photo saved as 'captured_photo.jpg'")
+print("\nDebug: Saved capture as 'last_capture.jpg'")

@@ -1,8 +1,7 @@
 from django.urls import path
-from .views import VerifyView, VerifyCameraView, AdminUploadView
+from .views import VerifyCameraView, VerifyImageView
 
 urlpatterns = [
-    path('verify/', VerifyView.as_view(), name='verify'),
     path('verify_camera/', VerifyCameraView.as_view(), name='verify_camera'),
-    path('admin/upload/', AdminUploadView.as_view(), name='admin_upload'),
+    path('verify/', VerifyImageView.as_view(), name='verify'),
 ]
